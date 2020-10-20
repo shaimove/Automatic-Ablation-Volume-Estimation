@@ -4,6 +4,7 @@ import torch
 import open3d as o3d
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+from scipy.signal import butter,filtfilt
 
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -297,8 +298,10 @@ def GetProjection(pcd,plane_eq,axis='y'):
 
     Returns
     -------
-    Max_height : TYPE
-        DESCRIPTION.
+    Max_height : 1D numpy array, float64
+        The maximum height for every interval in Y-projection.
+    order : 1D numpy array, float64
+        A structered 1D grid for Y-axis
 
     '''
     # take the require axis
@@ -328,7 +331,79 @@ def GetProjection(pcd,plane_eq,axis='y'):
         
         
     
-    return Max_height
+    return order,Max_height
+
+
+
+
+
+def DivideGroovesProjection(max_height_y,order,pcd):
+    '''
+    This function perform segemntation of the point cloud, into different 
+    Segements, every segment contain one groove. this calculation is vased on
+    Y-axis projection of the point cloud, so you need to call GetProjection function
+    To get max_height_y & order. 
+    Currently - this method don't work, beacuse the side planes aren't parrallel 
+    To XZ or YZ plane, so part of the groove is outside the segemntation
+
+    Parameters
+    ----------
+    max_height_y : 1D numpy array, float64
+        The maximum height for every interval in Y-projection.
+    order : 1D numpy array, float64
+        A structered 1D grid for Y-axis
+    pcd : 2D numpy matrix, shape (N,3) float64
+        Point cloud, without rotation of the plain.
+    
+    Returns
+    -------
+    grooves : list of 2D numpy array, every element in the list is (N,3) float64
+        list of grooves, every element contain a point cloud of a single groove
+
+    '''
+    # filter the max_height_y projection array, and find threshold
+    b, a = butter(N=7, Wn=0.08)
+    max_height_y_filter = filtfilt(b, a,max_height_y[100:-100])
+    med = np.quantile(max_height_y_filter,0.32)
+    move_ind_by = 30
+    
+    # start grooves
+    gt = max_height_y_filter[:-1] > med; lt = max_height_y_filter[1:] < med
+    groove_start = np.where(gt * lt)[0] - move_ind_by
+    groove_start_y = np.take(max_height_y_filter,groove_start)
+    
+    # end grooves
+    gt = max_height_y_filter[:-1] < med; lt = max_height_y_filter[1:] > med
+    groove_end = np.where(gt * lt)[0] + move_ind_by
+    groove_end_y = np.take(max_height_y_filter,groove_end)
+
+
+    # plot
+    plt.figure('Grooves Segmentation')
+    plt.plot(max_height_y_filter); 
+    plt.plot(max_height_y[100:]); 
+    plt.scatter(groove_start,groove_start_y,marker='o',color='r')
+    plt.scatter(groove_end,groove_end_y,marker='o',color='g')
+    #plt.plot(np.ones(np.shape(max_height_y_filter))*med,color='c');
+    plt.grid()
+    
+    # fix indexs
+    groove_start = np.int64(groove_start + 100)
+    groove_end = np.int64(groove_end + 100)
+    
+    # now, take the value range in y values according to order
+    groove_start = np.take(order,groove_start)
+    groove_end = np.take(order,groove_end)
+    
+    # find point cloud for each groove
+    grooves = []
+    for groove in range(len(groove_start)):
+        ind = np.where(np.logical_and(pcd[:,1] >= groove_start[groove], pcd[:,1] < groove_end[groove]))
+        pcd_groove = pcd[ind,:]
+        grooves.append(pcd_groove)
+
+    
+    return grooves
     
 #%% Plane equations
 # 1. Parrallel to z-plane, Ax+By+Cz+D=0 becomes to Ax+By+D=0 (side planes)

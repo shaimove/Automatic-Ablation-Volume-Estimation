@@ -6,6 +6,7 @@ import torch
 from plane import Plane
 import utils
 from tqdm import tqdm
+from scipy.signal import butter,filtfilt
 
 # check GPU
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -27,6 +28,10 @@ pcd = np.asarray(mesh.vertices)
 Main_plane = Plane()
 Main_plane_eq, Main_plane_inliers = Main_plane.fit(pcd,thresh=0.03)
 
+# make sure that the normal direction is in the same direction
+if Main_plane_eq[-1] < 0:
+    Main_plane_eq = Main_plane_eq * (-1)
+    
 # Find angels to rotate the point cloud and rotate it- currently not necessary 
 #angels = utils.extractAngles(Main_plane_eq)
 #pcd = utils.Rotate(pcd,angels)
@@ -43,16 +48,10 @@ Main_plane_eq, Main_plane_inliers = Main_plane.fit(pcd,thresh=0.03)
 
 #%% Module 3: Idetify the grooves and divide into different point could
 # calculate the maximum height in y-axis projection
-max_height_y = utils.GetProjection(pcd,Main_plane_eq,axis='y')
+order,max_height_y = utils.GetProjection(pcd,Main_plane_eq,axis='y')
 
-
-# plot single groove
-index = np.where(np.logical_and(pcd[:,1] > -20, pcd[:,1] < -18.5))[0]
-pcd_groove_1 = pcd[index,:]
-
-utils.DrawPointCloud(pcd_groove_1)
-
-
+# find segments from Y-axis projection
+grooves = utils.DivideGroovesProjection(max_height_y,order,pcd)
 
 
 
