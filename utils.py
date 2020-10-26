@@ -273,7 +273,7 @@ def DrawPointCloud(stone):
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(stone)
     pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
-    pcd.paint_uniform_color((1, 0, 0))
+    pcd.paint_uniform_color((0,1,0))
 
     o3d.visualization.draw_geometries([pcd])
     
@@ -298,62 +298,72 @@ def GetProjection(pcd,plane_eq,axis='y'):
 
     Returns
     -------
-    Max_height : 1D numpy array, float64
+    Projection : 1D numpy array, float64
         The maximum height for every interval in Y-projection.
-    order : 1D numpy array, float64
+    axis_intervals : 1D numpy array, float64
         A structered 1D grid for Y-axis
 
     '''
-    # take the require axis
+    # Pich the desired axis to calculate the projection
     if axis == 'y':
-        pcd_axis = pcd[:,1];
+        pcd_axis = torch.from_numpy(pcd[:,1]).to(device)
         plain_coeff = plane_eq[1]
     elif axis == 'x': 
-        pcd_axis = pcd[:,0]
-        plain_coeff = plane_eq[0]
+        pcd_axis = torch.from_numpy(pcd[:,0]).to(device)
+        plain_coeff = plane_eq[0] 
     else:
         return None
     
-    # calculate the order of the point cloud with intervals of 0.001
-    order = np.arange(np.min(pcd_axis), np.max(pcd_axis), 0.01)
-    Max_height = []
+    # calculate axis intervals with intervals of 0.001
+    axis_intervals = torch.arange(torch.min(pcd_axis),torch.max(pcd_axis), 0.01)
+    Projection = torch.zeros(len(axis_intervals) - 1)
+    pcd = torch.from_numpy(pcd).to(device)
     
-    # find points in the point cloud, belonging to that range
-    for row in tqdm(range(len(order) - 1)):
-        ind = np.where(np.logical_and(pcd_axis >= order[row], pcd_axis < order[row+1]))
-        Max_height.append(np.max(pcd[ind,2])- plain_coeff*order[row])
+    # Calculate Projection
+    for row in tqdm(range(len(axis_intervals) - 1)):
+        # find the points in the point cloud, beloging to every interval in axis_intervals
+        ind = torch.where(torch.logical_and(pcd_axis >= axis_intervals[row],
+                                            pcd_axis < axis_intervals[row+1]))[0]
+        # for every interval, take the maximum height (from the points belogons to that inteval)
+        # in addition subtract the height of the plane according to main plane equation
+        # so the projection will "see" plane parrallel to the XY plane
+        Projection[row] = torch.max(pcd[ind,2]) - plain_coeff * axis_intervals[row]
     
-    # create figure
-    Max_height = np.array(Max_height)
+        
+    # Plot the projection
+    Max_height = Projection.cpu().numpy()
+    axis_intervals = axis_intervals.cpu().numpy()
     plt.figure()
-    plt.plot(order[:-1],Max_height)
+    plt.plot(axis_intervals[:-1],Max_height)
     plt.title('Max height in %s axis' % axis); plt.grid()
-        
-        
     
-    return order,Max_height
+    return axis_intervals,Projection
+    
+    
 
-
-
-
-
-def DivideGroovesProjection(max_height_y,order,pcd):
+def DivideGroovesProjection(pcd,Projection,axis_intervals,quantile,num_margin_intervals,axis):
     '''
     This function perform segemntation of the point cloud, into different 
     Segements, every segment contain one groove. this calculation is vased on
     Y-axis projection of the point cloud, so you need to call GetProjection function
-    To get max_height_y & order. 
+    To get max_height_y & axis_intervals. 
     Currently - this method don't work, beacuse the side planes aren't parrallel 
     To XZ or YZ plane, so part of the groove is outside the segemntation
 
     Parameters
     ----------
-    max_height_y : 1D numpy array, float64
-        The maximum height for every interval in Y-projection.
-    order : 1D numpy array, float64
-        A structered 1D grid for Y-axis
     pcd : 2D numpy matrix, shape (N,3) float64
         Point cloud, without rotation of the plain.
+    Projection : 1D numpy array, float64
+        The maximum height for every interval in Y-axis projection.
+    axis_intervals : 1D numpy array, float64
+        A structered 1D (constant interval) for Y-axis
+    quantile : float64, between 0 to 1 
+        which quantile to use as a threshold
+    num_margin_intervals : integer
+        The filtered projection with threshold give us position of the begining of the
+        groove, but since the groove isn't orthogonal to the edges, we need to take
+        more big margins, how many intervals to take as margin in Y-axis.
     
     Returns
     -------
@@ -361,50 +371,121 @@ def DivideGroovesProjection(max_height_y,order,pcd):
         list of grooves, every element contain a point cloud of a single groove
 
     '''
-    # filter the max_height_y projection array, and find threshold
+    # Filter the Projection array using LPF butter
+    # ignore first and last 100 intervals, it's the sides of the stone
     b, a = butter(N=7, Wn=0.08)
-    max_height_y_filter = filtfilt(b, a,max_height_y[100:-100])
-    med = np.quantile(max_height_y_filter,0.32)
-    move_ind_by = 30
+    Projection_filtered = filtfilt(b, a,Projection[100:-200])
     
-    # start grooves
-    gt = max_height_y_filter[:-1] > med; lt = max_height_y_filter[1:] < med
-    groove_start = np.where(gt * lt)[0] - move_ind_by
-    groove_start_y = np.take(max_height_y_filter,groove_start)
+    # Find threshold based on quatile
+    threshold = np.quantile(Projection_filtered,quantile)
     
-    # end grooves
-    gt = max_height_y_filter[:-1] < med; lt = max_height_y_filter[1:] > med
-    groove_end = np.where(gt * lt)[0] + move_ind_by
-    groove_end_y = np.take(max_height_y_filter,groove_end)
+    
+    # Find positions where the groove starts according to threshold
+    # where the projection in (i-1) was above the threshold and in (i) below the threshold
+    gt = Projection_filtered[:-1] > threshold
+    lt = Projection_filtered[1:] < threshold
+    # move the start index num_margin_intervals to the left to take margins
+    groove_start = np.where(gt * lt)[0] - num_margin_intervals
+    # we found the indexs, now take the y-axis values from projection
+    groove_start_y = np.take(Projection_filtered,groove_start)
+    
+    # Find positions where the groove ends according to the threshold 
+    # where the projection in (i-1) was below the threshold and in (i) above the threshold
+    gt = Projection_filtered[:-1] < threshold
+    lt = Projection_filtered[1:] > threshold
+    # move the end index num_margin_intervals to the right to take margins
+    groove_end = np.where(gt * lt)[0] + num_margin_intervals
+    # we found the indexs, now take the y-axis values from projection
+    groove_end_y = np.take(Projection_filtered,groove_end)
 
 
-    # plot
+    # Plot Groove Segmentation process
     plt.figure('Grooves Segmentation')
-    plt.plot(max_height_y_filter); 
-    plt.plot(max_height_y[100:]); 
+    plt.plot(Projection_filtered); 
+    plt.plot(Projection[100:]); 
     plt.scatter(groove_start,groove_start_y,marker='o',color='r')
     plt.scatter(groove_end,groove_end_y,marker='o',color='g')
-    #plt.plot(np.ones(np.shape(max_height_y_filter))*med,color='c');
+    #plt.plot(np.ones(np.shape(Projection_filtered))*threshold,color='c');
+    plt.legend(['Filtered Projection_filtered','Projection','Groove starts','Groove ends'])
     plt.grid()
     
-    # fix indexs
+    # Fix indexs, we igonred the first 100 intervals at the segmentation process 
     groove_start = np.int64(groove_start + 100)
     groove_end = np.int64(groove_end + 100)
     
-    # now, take the value range in y values according to order
-    groove_start = np.take(order,groove_start)
-    groove_end = np.take(order,groove_end)
+    # Now we have found the indexs where the grooves started and ended, we need to 
+    # take the Y-axis values for every groove before partition
+    groove_start = np.take(axis_intervals,groove_start)
+    groove_end = np.take(axis_intervals,groove_end)
     
-    # find point cloud for each groove
+    # Choose axis to work on, x or y
+    if axis == 'y':
+        pcd_axis = pcd[:,1];
+    elif axis == 'x': 
+        pcd_axis = pcd[:,0]
+    else:
+        return None
+    
+    # According to indexs found in axis_intervals, take point cloud and assign to 
+    # the different grooves segments
     grooves = []
     for groove in range(len(groove_start)):
-        ind = np.where(np.logical_and(pcd[:,1] >= groove_start[groove], pcd[:,1] < groove_end[groove]))
+        # which indexs from the point cloud?
+        ind = np.where(np.logical_and(pcd_axis >= groove_start[groove], 
+                                      pcd_axis < groove_end[groove]))
+        # take those points
         pcd_groove = pcd[ind,:]
+        # add to a list
         grooves.append(pcd_groove)
 
     
     return grooves
+
+
+
+def PlotSegmentedGrooves(grooves):
+    '''
+    This function plot all grooves in one open3d pointcloud, every groove in different color
+
+    Parameters
+    ----------
+    grooves : list of 2D numpy array, every element in the list is (N,3) float64
+        list of grooves, every element contain a point cloud of a single groove
+
+    Returns
+    -------
+    pcd_grooves
+
+    '''
+    number_grooves = len(grooves)
+    pcd_grooves = o3d.geometry.PointCloud()
+    colors = np.random.rand(3,number_grooves)
     
+    for groove in range(number_grooves):
+        groove_pcd = grooves[groove][0]
+        color =  np.expand_dims(colors[:,groove],axis=0)
+        color = np.repeat(color,groove_pcd.shape[0],axis=0)
+        
+        # add to numpy array of all point cloud
+        if groove == 0:
+            grooves_pcd = groove_pcd
+            colors_pcd = color
+        else:
+            grooves_pcd = np.concatenate((grooves_pcd,groove_pcd),axis=0)
+            colors_pcd = np.concatenate((colors_pcd,color),axis=0)
+            
+            
+    
+    pcd_grooves.points = o3d.utility.Vector3dVector(grooves_pcd)
+    pcd_grooves.colors = o3d.utility.Vector3dVector(colors_pcd)
+        
+    pcd_grooves.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+    o3d.visualization.draw_geometries([pcd_grooves])
+    
+    
+    return pcd_grooves
+    
+
 #%% Plane equations
 # 1. Parrallel to z-plane, Ax+By+Cz+D=0 becomes to Ax+By+D=0 (side planes)
 # beacuse (A,B,0)*(0,0,1) = 0 = [ like (A,B,C)*k vector] 
