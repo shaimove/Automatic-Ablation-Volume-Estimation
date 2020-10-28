@@ -11,35 +11,7 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 
 
-def SortPointCloud(stone):
-    '''
-    This function sort the values of the Point cloud, in lexigraphic otder
-    The function first sort the point cloud by the y-values, and then sort
-    The point cloud by the x-values. 
-
-    Parameters
-    ----------
-    stone : 2D numpy matrix, shape (N,3) float64
-        Point Cloud unsorted
-
-    Returns
-    -------
-    stone : 2D numpy matrix, shape (N,3) float64
-        Point Cloud sorted in lexigraphic order.
-
-    '''
-    # sort PCD by y-value
-    order_y = np.argsort(stone[:,1])
-    stone = stone[order_y,:]
-    
-    # now, we can sort by x coordinate, and the array will be sorted lexiographic
-    order_x = np.argsort(stone[:,0])
-    stone = stone[order_x,:]
-    
-    return stone
-
-
-def CalculateIntegral(stone,plane_eq):
+def CalculateIntegral(groove,plane_eq,delta_x,delta_y,delta_z):
     '''
     This function calculate the ablation volume of the groove. 
     The groove is an ordered point cloud, and the plane equation blocks
@@ -48,11 +20,15 @@ def CalculateIntegral(stone,plane_eq):
 
     Parameters
     ----------
-    stone : 2D numpy matrix, shape (N,3) float64
+    groove : 2D numpy matrix, shape (N,3) float64
         Ordered Point cloud, with interval of delta_x, delta_y.
         more than one z-value is possible
     plane_eq : list of (1,4) float64 coefficient
         Plain Equation: A*x + B*y + C*z + D=0.
+    delta_x : float64
+        The average distance between points in the scanning in x-axis
+    delta_y : float64
+        The average distance between points in the scanning in y-axis
 
     Returns
     -------
@@ -60,22 +36,17 @@ def CalculateIntegral(stone,plane_eq):
         Ablation volume in units of [mm^3]
 
     '''
-    
-    # find delta_x and delta_y
-    delta_x, delta_y = stone[1,0,0] - stone[0,0,0], stone[0,1,0] - stone[0,0,0]
-    
     # take sample grid and calculate plane 3D grid
     # coeff_x*x + coeff_y*y + coeff_z*z + const = 0 to:
     # z = (coeff_x*x + coeff_y*y + const) / (-coeff_z)
-    plane = np.unique(stone[:,:2],axis=0) # take (x,y) grid withput reptitions
-    z = (plane_eq[0] * plane[0] + plane_eq[1] * plane[1] + plane_eq[3])/(-plane_eq[2]) # calculate z
-    plane = np.concatenate((plane,z),axis=1) # concate to one matrix
+    groove_xy = groove[:,0:-1]
+    plane = (plane_eq[0] * groove_xy[:,0] + plane_eq[1] * groove_xy[:,1] + plane_eq[3])/(-plane_eq[2]) # calculate z
     
     # (delta_x / 2) * (delta_y / 2) * z = Infinitesimal volume
-    area = (delta_x / 2) * (delta_y / 2) # dx*dy
-    diff = plane[:,2] - stone[:,2] # vector of different 
+    volume_infi = delta_x * delta_y * delta_z # dx*dy*dz
+    diff = plane - groove[:,2] # vector of different 
     diff = diff.clip(min=0) # zeros values to zero
-    volume = np.sum(area * diff) # dx*dy*dz sum
+    volume = np.sum(volume_infi * diff) # dx*dy*dz sum
     
     
     return volume
@@ -90,7 +61,7 @@ def extractAngles(plane):
     Parameters
     ----------
     plane : list of (1,4) float64 coefficient
-        Plain Equation: A*x + B*y + C*z + D=0..
+        Plain Equation: A*x + B*y + C*z + D=0.
 
     Returns
     -------
@@ -171,7 +142,7 @@ def GetProjection(pcd,plane_eq,Interval_size=0.01,axis='y',Plot=False):
     ----------
     pcd : 2D numpy matrix, shape (N,3) float64
         Point cloud, without rotation of the plain
-    plane_eq: 
+    plane_eq: list of (1,4) float64 coefficient
         The main plain equation, to correct the values of the height according to 
         location
     Interval_size: Float64
@@ -199,7 +170,7 @@ def GetProjection(pcd,plane_eq,Interval_size=0.01,axis='y',Plot=False):
     else:
         return None
     
-    # calculate axis intervals with intervals of 0.001
+    # calculate axis intervals with intervals of Interval_size
     axis_intervals = torch.arange(torch.min(pcd_axis),torch.max(pcd_axis), Interval_size)
     Projection = torch.zeros(len(axis_intervals) - 1)
     pcd = torch.from_numpy(pcd).to(device)
@@ -234,23 +205,23 @@ def CutEdges(groove,plane_eq,quantileLow,quantileHigh,axis='x',plot=False):
 
     Parameters
     ----------
-    groove : TYPE
+    groove : 2D numpy matrix, shape (N,3) float64
+        Point cloud, represent only one groove.
+    Main_plane_eq : list of (1,4) float64 coefficient
+        Plain Equation: A*x + B*y + C*z + D=0
+    quantileLow : float64 between 0 to 1
         DESCRIPTION.
-    Main_plane_eq : TYPE
+    quantileHigh : float64 between 0 to 1, higher than quantileLow
         DESCRIPTION.
-    quantileLow : TYPE
-        DESCRIPTION.
-    quantileHigh : TYPE
-        DESCRIPTION.
-    axis : TYPE, optional
-        DESCRIPTION. The default is 'x'.
-    plot: 
-        
+    axis : string, optional
+        Indicating which axis you want to project, X-axis or Y-axis. The default is 'x'.
+    plot: Boolean, optional
+        if True, plot projection, if False, don't plot
 
     Returns
     -------
-    groove_new : TYPE
-        DESCRIPTION.
+    groove_new : 2D numpy matrix, shape (M,3) float64, where M <= N
+        Point cloud, represent only one groove after the edges where cutted
 
     '''
     # Pick the desired axis to calculate the projection
@@ -270,8 +241,8 @@ def CutEdges(groove,plane_eq,quantileLow,quantileHigh,axis='x',plot=False):
     groove_new = groove[ind,:]
     
     if plot:
-        axis_intervals,projection = GetProjection(groove,plane_eq,0.02,axis,False)
-        axis_intervals_new,projection_new = GetProjection(groove_new,plane_eq,0.02,axis,False)
+        axis_intervals,projection = GetProjection(groove,plane_eq,1,axis,False)
+        axis_intervals_new,projection_new = GetProjection(groove_new,plane_eq,1,axis,False)
         
         plt.figure()
         plt.plot(axis_intervals[1:],projection)
@@ -314,8 +285,9 @@ def DivideGroovesProjection(pcd,Projection,axis_intervals,quantile,num_margin_in
     '''
     # Filter the Projection array using LPF butter
     # ignore first and last 100 intervals, it's the sides of the stone
-    b, a = butter(N=7, Wn=0.08)
+    b, a = butter(N=7, Wn=0.2)
     Projection_filtered = filtfilt(b, a,Projection[100:-200])
+    #Projection_filtered = Projection
     
     # Find threshold based on quatile
     threshold = np.quantile(Projection_filtered,quantile)
@@ -342,12 +314,11 @@ def DivideGroovesProjection(pcd,Projection,axis_intervals,quantile,num_margin_in
 
     # Plot Groove Segmentation process
     plt.figure('Grooves Segmentation')
-    plt.plot(Projection_filtered); 
-    plt.plot(Projection[100:]); 
+    plt.plot(Projection_filtered);  
     plt.scatter(groove_start,groove_start_y,marker='o',color='r')
     plt.scatter(groove_end,groove_end_y,marker='o',color='g')
     #plt.plot(np.ones(np.shape(Projection_filtered))*threshold,color='c');
-    plt.legend(['Filtered Projection_filtered','Projection','Groove starts','Groove ends'])
+    plt.legend(['Filtered Projection_filtered','Groove starts','Groove ends'])
     plt.grid()
     
     # Fix indexs, we igonred the first 100 intervals at the segmentation process 
@@ -468,6 +439,8 @@ def PointCloud2Grid(pcd,voxel_size):
     # if not, the Grid if full
     if ind_x.size == 0 and ind_y.size == 0:
         print('Grid is Full')
+        print('Original Point Cloud Size: %d' % pcd.shape[0])
+        print('New Point Cloud Size: %d' % pcd_grid.shape[0])
     else:
         print('Grid is not full. fill the holes')
     
