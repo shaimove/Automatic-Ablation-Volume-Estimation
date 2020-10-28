@@ -73,7 +73,7 @@ class Plane:
         
         # print equation
         [a, b, c, d] = self.equation
-        print(f"Plane equation: {a:.3f}x + {b:.3f}y + {c:.3f}z + {d:.2f} = 0")
+        print(f"\nPlane equation: {a:.3f}x + {b:.3f}y + {c:.3f}z + {d:.2f} = 0")
         
         # transform to numpy
         self.equation = TensorList2Array(self.equation)

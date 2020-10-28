@@ -82,67 +82,6 @@ def CalculateIntegral(stone,plane_eq):
 
 
 
-def Rotate(stone,angels):
-    '''
-    This function rotate a point cloud so the main plain, is parrallel to 
-    X-Y plane. the angels: (theta_x,theta_y,theta_z) = (roll,pitch,yaw) 
-    is used in homogenous coordinate to rotate the point cloud easily.
-    for more info: see pdf file with explanations about affine transformation
-
-    Parameters
-    ----------
-    stone : 2D numpy matrix, shape (N,3) float64
-        The point cloud
-    angels : list of (1,3) float64 
-        angels in [Rad] units
-
-    Returns
-    -------
-    stone_new : 2D numpy matrix, shape (N,3) float64
-        The point cloud rotated
-
-    '''
-    # if I want to add offset to the plane, I need to add const value 
-    # to the last zero in every of the first 3 rows. without the changing the 1!
-    # but then we need to divide the (x,y,z) value by the last value to trandform to 
-    # in non-homogenous corrdinate, only in the last matrix (after matmul)
-    
-    
-    # Define R_x,R_y,R_z
-    theta_x,theta_y,theta_z = angels
-    
-    R_x = [[1,      0,                  0,     0],
-           [0,np.cos(theta_x),-np.sin(theta_x),0],
-           [0,np.sin(theta_x), np.cos(theta_x),0],
-           [0,      0,                  0,     1]]
-    
-    R_y = [[np.cos(theta_y),0,np.sin(theta_y), 0],
-           [0,      1,                  0,     0],
-           [-np.sin(theta_y),0,np.cos(theta_y),0],
-           [0,      0,                  0,     1]]
-    
-    R_z = [[np.cos(theta_z),-np.sin(theta_z),0, 0],
-           [np.sin(theta_z), np.cos(theta_z),0, 0],
-           [0,      0,                  1,      0],
-           [0,      0,                  0,      1]]
-    
-    # Add 1's to stone matrix to (4*n)
-    ones = np.ones((stone.shape[0],1)) # create 1's vector
-    stone = np.concatenate((stone,ones),axis=1) # concatenate
-    stone = np.transpose(stone)
-    
-    # stone_new = N*4, Rotation = 4*4, stone 4*N;
-    # so 4*N = stone * Rotation - and then transpose
-    Rotation = np.matmul(np.matmul(R_x,R_y),R_z)
-    stone_new = np.matmul(Rotation,stone)
-    stone_new = np.transpose(stone_new)
-    
-    # remove 1's
-    stone_new = stone_new[:,:3]
-    
-    return stone_new
-
-
 def extractAngles(plane):
     '''
     This function calculate the angels to rotate the point cloud
@@ -196,64 +135,6 @@ def TensorList2Array(tensorlist):
 
 
 
-def CreateMesh(point_cloud):
-    '''
-    This function take point cloud without ordered grid, calculate average 
-    Interval between points (assuming the interval is constant in both axises)
-    And return the grid, without assiging z-values to the grid. 
-    The number of points in the grid is roughly the same as the original point
-    Cloud. the comment part is a loop to assign z-values to the grid using nearest neighbor
-    on GPU computation. currently the computation time is to long
-
-    Parameters
-    ----------
-    point_cloud : 2D numpy matrix, shape (N,3) float64
-        Point Cloud without ordred mesh
-
-    Returns
-    -------
-    Grid : 2D numpy matrix, shape (N,2) float64
-        Ordered Grid without z-value
-
-    '''
-    # Calculate minimum and maximum x and y values
-    min_x = np.min(point_cloud[:,0])
-    max_x = np.max(point_cloud[:,0]) 
-    width_x = max_x - min_x
-    min_y = np.min(point_cloud[:,1])
-    max_y = np.max(point_cloud[:,1])
-    width_y = max_y - min_y
-        
-    interval = point_cloud.shape[0] / (width_x * width_y)
-    interval_square = interval ** 0.5
-        
-    points_in_y = int(width_y * interval_square)
-    points_in_x = int(width_x * interval_square)
-        
-    X = np.linspace(min_x,max_x,points_in_x)
-    Y = np.linspace(min_y,max_y,points_in_y)
-    
-    X_grid = np.expand_dims(np.tile(X,len(Y)),axis=1)
-    Y_grid = np.expand_dims(np.repeat(Y,len(X)),axis=1)
-    Grid = np.concatenate((X_grid,Y_grid),axis=1)
-
-    return Grid
-    
-    #point_cloud = torch.from_numpy(point_cloud).to(device)
-    #Grid = torch.from_numpy(Grid).to(device)
-    #pcd_close_Grid = torch.zeros(point_cloud.shape).to(device)
-    
-    #for point_in_pcd in tqdm(range(point_cloud.shape[0])):
-    #    x_pcd,y_pcd = point_cloud[point_in_pcd,0],point_cloud[point_in_pcd,1]
-    #    dist = torch.sqrt(torch.square(x_pcd-Grid[:,0]) + torch.square(y_pcd-Grid[:,1]))
-    #    ind = torch.argmin(dist) # minimum point in Grid that is close to point cloud
-    #    pcd_close_Grid[point_in_pcd,:2] = Grid[ind,:]
-    
-    #pcd_close_Grid[:,2] = point_cloud[:,2]
-    
-    #return pcd_close_Grid
-
-
 
 def DrawPointCloud(stone):
     '''
@@ -281,7 +162,7 @@ def DrawPointCloud(stone):
     
 
 
-def GetProjection(pcd,plane_eq,axis='y'):
+def GetProjection(pcd,plane_eq,Interval_size=0.01,axis='y',Plot=False):
     '''
     This function calculate the projection of the stone in the Y axis
     In order to detect the grooves. possible for x-axis to.
@@ -293,9 +174,13 @@ def GetProjection(pcd,plane_eq,axis='y'):
     plane_eq: 
         The main plain equation, to correct the values of the height according to 
         location
+    Interval_size: Float64
+        The interval size of the axis_intervals array, the smaller, the more precise
+        the approxiamtion, but contain less points
     axis : string, optional
         Indicating which axis you want to project, X-axis or Y-axis. The default is 'y'.
-
+    Plot : Boolean
+        if True, plot projection, if False, don't plot
     Returns
     -------
     Projection : 1D numpy array, float64
@@ -304,7 +189,7 @@ def GetProjection(pcd,plane_eq,axis='y'):
         A structered 1D grid for Y-axis
 
     '''
-    # Pich the desired axis to calculate the projection
+    # Pick the desired axis to calculate the projection
     if axis == 'y':
         pcd_axis = torch.from_numpy(pcd[:,1]).to(device)
         plain_coeff = plane_eq[1]
@@ -315,7 +200,7 @@ def GetProjection(pcd,plane_eq,axis='y'):
         return None
     
     # calculate axis intervals with intervals of 0.001
-    axis_intervals = torch.arange(torch.min(pcd_axis),torch.max(pcd_axis), 0.01)
+    axis_intervals = torch.arange(torch.min(pcd_axis),torch.max(pcd_axis), Interval_size)
     Projection = torch.zeros(len(axis_intervals) - 1)
     pcd = torch.from_numpy(pcd).to(device)
     
@@ -329,17 +214,73 @@ def GetProjection(pcd,plane_eq,axis='y'):
         # so the projection will "see" plane parrallel to the XY plane
         Projection[row] = torch.max(pcd[ind,2]) - plain_coeff * axis_intervals[row]
     
-        
-    # Plot the projection
-    Max_height = Projection.cpu().numpy()
+    
+    # Convert back to Numpy array and CPU
+    Projection = Projection.cpu().numpy()
     axis_intervals = axis_intervals.cpu().numpy()
-    plt.figure()
-    plt.plot(axis_intervals[:-1],Max_height)
-    plt.title('Max height in %s axis' % axis); plt.grid()
+    
+    # Plot the projection
+    if Plot:
+        plt.figure()
+        plt.plot(axis_intervals[:-1],Projection)
+        plt.title('Max height in %s axis' % axis); plt.grid()
     
     return axis_intervals,Projection
     
     
+def CutEdges(groove,plane_eq,quantileLow,quantileHigh,axis='x',plot=False):
+    '''
+    This function remove the edge of the stone 
+
+    Parameters
+    ----------
+    groove : TYPE
+        DESCRIPTION.
+    Main_plane_eq : TYPE
+        DESCRIPTION.
+    quantileLow : TYPE
+        DESCRIPTION.
+    quantileHigh : TYPE
+        DESCRIPTION.
+    axis : TYPE, optional
+        DESCRIPTION. The default is 'x'.
+    plot: 
+        
+
+    Returns
+    -------
+    groove_new : TYPE
+        DESCRIPTION.
+
+    '''
+    # Pick the desired axis to calculate the projection
+    if axis == 'y':
+        groove_axis = groove[:,1]
+    elif axis == 'x': 
+        groove_axis = groove[:,0]
+    else:
+        return None
+    
+    # Calculate extreme quantile 
+    Q1_precent = np.quantile(groove_axis,quantileLow)
+    Q4_precent = np.quantile(groove_axis,quantileHigh)
+    
+    # remove all points with higher than Q4_precent in y-axis and lower than Q1_precent
+    ind = np.where(np.logical_and(groove_axis > Q1_precent,groove_axis < Q4_precent))[0]
+    groove_new = groove[ind,:]
+    
+    if plot:
+        axis_intervals,projection = GetProjection(groove,plane_eq,0.02,axis,False)
+        axis_intervals_new,projection_new = GetProjection(groove_new,plane_eq,0.02,axis,False)
+        
+        plt.figure()
+        plt.plot(axis_intervals[1:],projection)
+        plt.plot(axis_intervals_new[1:],projection_new)
+        plt.grid(); plt.legend(['Original projection','Projection after cutting edge'])
+    
+    return groove_new
+
+
 
 def DivideGroovesProjection(pcd,Projection,axis_intervals,quantile,num_margin_intervals,axis):
     '''
@@ -485,6 +426,53 @@ def PlotSegmentedGrooves(grooves):
     
     return pcd_grooves
     
+def PointCloud2Grid(pcd,voxel_size):
+    '''
+    This function takes 
+
+    Parameters
+    ----------
+    pcd : 2D numpy matrix, shape (N,3) float64
+        Point cloud
+    voxel_size : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    pcd_grid : 2D numpy matrix, shape (M,3) float64, where M <= N
+        Point cloud, where the X,Y space is structured on a grid
+
+    '''
+    # Create Point Cloud and transform it to VoxelGrid
+    pointcloud = o3d.geometry.PointCloud()
+    pointcloud.points = o3d.utility.Vector3dVector(pcd)
+    VoxelGrid = o3d.geometry.VoxelGrid.create_from_point_cloud(pointcloud,voxel_size)
+
+    # Get all the voxels and transform it to 2D numpy array
+    Voxels = VoxelGrid.get_voxels()
+    pcd_grid = np.zeros((len(Voxels),3))
+    
+    for i,voxel in enumerate(Voxels):
+        pcd_grid[i,:] = voxel.grid_index
+
+    
+    # Check if the Grid is full without holes
+    # sort the x and y values, the calculate difference between consecutive values
+    x_grid_diff = np.diff(np.sort(np.unique(pcd_grid[:,0])))
+    y_grid_diff = np.diff(np.sort(np.unique(pcd_grid[:,1])))
+    
+    # find where the difference between consecutive values is differenet than 1?
+    ind_x = np.where(x_grid_diff != 1)[0]
+    ind_y = np.where(y_grid_diff != 1)[0]
+    
+    # if not, the Grid if full
+    if ind_x.size == 0 and ind_y.size == 0:
+        print('Grid is Full')
+    else:
+        print('Grid is not full. fill the holes')
+    
+    
+    return pcd_grid
 
 #%% Plane equations
 # 1. Parrallel to z-plane, Ax+By+Cz+D=0 becomes to Ax+By+D=0 (side planes)
