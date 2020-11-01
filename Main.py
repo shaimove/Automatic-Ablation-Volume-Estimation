@@ -58,18 +58,47 @@ num_margin_intervals = 20;
 
 grooves = utils.DivideGroovesProjection(pcd,Projection,axis_intervals,quantile,
                                         num_margin_intervals,axis)
-pcd_grooves = utils.PlotSegmentedGrooves(grooves)
+pcd_grooves,colors = utils.PlotSegmentedGrooves(grooves)
 
 #%% Module 6: Cut the sides of the point cloud 
 # take one groove
-groove = grooves[1][0]
-
+grooves_new = []
 # define parameters for the function
 quantileLow = 0.05; quantileHigh = 0.93; axis = 'y'
-groove_new = utils.CutEdges(groove,Main_plane_eq,quantileLow,quantileHigh,axis,True)
+
+for i in range(len(grooves)):
+    groove = grooves[i][0]
+    groove_analyzed = utils.CutEdges(groove,Main_plane_eq,quantileLow,quantileHigh,axis,False)
+    grooves_new.append(groove_analyzed)
 
 
-#%% Module 7: Calculate the volume of the groove
-volume = utils.CalculateIntegral(groove_new,Main_plane_eq,delta_x,delta_y,delta_z)
+#%% Module 7: Calculate the volume of the groove and plot results
+volumes = []
+grooves_fill,colors_fill = utils.CreateGrooveFill(pcd,pcd,pcd,
+                                                  Main_plane_eq,(0,0,0),stone=True)
+
+for i in range(len(grooves_new)):
+    print('Groove number %d ' % i)
+    groove_new = grooves_new[i]
+    volume = utils.CalculateIntegral(groove_new,Main_plane_eq,delta_x,delta_y,delta_z)
+    volumes.append(volume)
+    grooves_fill,colors_fill = utils.CreateGrooveFill(groove_new,grooves_fill,
+                                                      colors_fill,Main_plane_eq,colors[i],
+                                                      stone=False)
+# Draw results
+
+for volume in volumes: print('\nThe groove volume is: %.2f mm^3' % volume)
+grooves_fill = grooves_fill.cpu().numpy()
+colors_fill = colors_fill.cpu().numpy()
+
+utils.DrawVoxelGrid(grooves_fill,colors_fill,voxel_size=1)
+
+
+#%% Module 8: Plot only grooves
+stone_length = pcd.shape[0]
+grooves_fill_no_stone = grooves_fill[stone_length:,:]
+colors_fill_no_stone = colors_fill[stone_length:,:]
+
+utils.DrawVoxelGrid(grooves_fill_no_stone,colors_fill_no_stone,voxel_size=1)
 
 
