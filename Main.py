@@ -58,7 +58,8 @@ num_margin_intervals = 20;
 
 grooves = utils.DivideGroovesProjection(pcd,Projection,axis_intervals,quantile,
                                         num_margin_intervals,axis)
-pcd_grooves,colors = utils.PlotSegmentedGrooves(grooves)
+pcd_grooves,colors = utils.PlotSegmentedGrooves(grooves,voxel_size=1)
+
 
 #%% Module 6: Cut the sides of the point cloud 
 # take one groove
@@ -78,7 +79,6 @@ grooves_fill,colors_fill = utils.CreateGrooveFill(pcd,pcd,pcd,
                                                   Main_plane_eq,(0,0,0),stone=True)
 
 for i in range(len(grooves_new)):
-    print('Groove number %d ' % i)
     groove_new = grooves_new[i]
     volume = utils.CalculateIntegral(groove_new,Main_plane_eq,delta_x,delta_y,delta_z)
     volumes.append(volume)
@@ -86,11 +86,7 @@ for i in range(len(grooves_new)):
                                                       colors_fill,Main_plane_eq,colors[i],
                                                       stone=False)
 # Draw results
-
 for volume in volumes: print('\nThe groove volume is: %.2f mm^3' % volume)
-grooves_fill = grooves_fill.cpu().numpy()
-colors_fill = colors_fill.cpu().numpy()
-
 utils.DrawVoxelGrid(grooves_fill,colors_fill,voxel_size=1)
 
 
@@ -102,3 +98,4 @@ colors_fill_no_stone = colors_fill[stone_length:,:]
 utils.DrawVoxelGrid(grooves_fill_no_stone,colors_fill_no_stone,voxel_size=1)
 
 
+utils.DrawVoxelGrid(pcd,None,voxel_size=0.8)

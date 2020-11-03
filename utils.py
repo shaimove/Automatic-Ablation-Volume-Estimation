@@ -57,17 +57,16 @@ def CreateGrooveFill(groove,grooves_fill,colors_fill,plane_eq,color,stone=False)
     '''
     This function create points cloud of every groove in seperate with different 
     Color, based on the stone point cloud, the groove boundries, and main plane
-    All calculation are preformed on GPU.
 
     Parameters
     ----------
     groove : 2D numpy matrix, shape (M,3) float64
         Point cloud, represent only one groove after the edges where cutted
         in case stone is True: the original Point Cloud of the stone
-    grooves_fill : 2D Torch matrix, shape (N,3) float64
+    grooves_fill : 2D Numpy matrix, shape (N,3) float64
         Poind Cloud of the stone and the grooves, this variabels move between
         Iterations, each iteration new groove is added to the point cloud
-    colors_fill : 2D Torch matrix, shape (N,3) float64
+    colors_fill : 2D Numpy matrix, shape (N,3) float64
         Matrix of the same size as colors_fill, holds the color for each groove
     plane_eq : list of (1,4) float64 coefficient
         Plain Equation: A*x + B*y + C*z + D=0
@@ -79,10 +78,10 @@ def CreateGrooveFill(groove,grooves_fill,colors_fill,plane_eq,color,stone=False)
         and add them to grooves_fill, and add points to colors_fill
     Returns
     -------
-    grooves_fill : 2D Torch matrix, shape (N,3) float64
+    grooves_fill : 2D Numpy matrix, shape (N,3) float64
         Poind Cloud of the stone and the grooves, this variabels move between
         Iterations, each iteration new groove is added to the point cloud
-    colors_fill : 2D Torch matrix, shape (N,3) float64
+    colors_fill : 2D Numpy matrix, shape (N,3) float64
         Matrix of the same size as colors_fill, holds the color for each groove
     '''
     if stone == True:
@@ -96,59 +95,38 @@ def CreateGrooveFill(groove,grooves_fill,colors_fill,plane_eq,color,stone=False)
         # for the stone we assign the color black (0,0,0)
         color = np.zeros((1,3))
         colors_fill = np.repeat(color,grooves_fill.shape[0],axis=0)
-        
-        # send to GPU
-        grooves_fill = torch.from_numpy(grooves_fill).to(device)
-        colors_fill = torch.from_numpy(colors_fill).to(device)
-        
+            
         
     else:
         # In this case we have already initiled the variables grooves_fill and colors_fill
         # and we need to add new points to them
         
-        # Stage 1: Calculate z-axis of the plane
-        # the same size as groove_grid
-        plane = (plane_eq[0] * groove[:,0] + plane_eq[1] * groove[:,1] + plane_eq[3])/(-plane_eq[2]) 
-        # send to GPU
-        plane = torch.from_numpy(plane).to(device)
-        groove = torch.from_numpy(groove).to(device)
-        color = torch.from_numpy(color).to(device)
+        # Take XY grid
+        xy = groove[:,:-1]
         
-        # create a 2D matrix (N,3) for every point the groove
-        for point in tqdm(range(groove.shape[0])):
-            # the height of the main plane
-            groove_Z = groove[point,2]
-            
-            # if plane isn't higher than the hight of the groove, fill it
-            if groove_Z < plane[point]:
-                # Version 1: create all points between stone and plane
-                if False:
-                    # create vector of z_values to comlete the groove 
-                    z_fill = torch.arange(groove_Z+1,plane[point]+1,1).to(device)
-                    z_fill = torch.unsqueeze(z_fill,1)
-                    
-                    # replecate the x,y point (grid points)
-                    xy = torch.unsqueeze(groove[point,0:-1],0).to(device)
-                    xy = xy.repeat(z_fill.shape[0],1)
-                # Version 2: create only twp points, plane and groove hieght
-                if True:
-                    z_fill = torch.tensor([groove_Z+1,plane[point]]).to(device)
-                    z_fill = torch.unsqueeze(z_fill,1)
-                    xy = torch.unsqueeze(groove[point,0:-1],0)
-                    xy = xy.repeat(2,1).to(device)
-                
-                # concatenate the x,y point with z-valus
-                point_fill = torch.cat((xy,z_fill),1)
-                
-                # add the points to grooves_fill
-                grooves_fill = torch.cat((grooves_fill,point_fill),0)
+        # Calculate z-axis of the plane
+        plane = (plane_eq[0] * xy[:,0] + plane_eq[1] * xy[:,1] + plane_eq[3])/(-plane_eq[2]) 
         
+        # calculate height of the groove
+        z = groove[:,2] + 1
+        
+        # Concatenate groove height to groove
+        z = np.expand_dims(z,axis=1)
+        z = np.concatenate((xy,z),axis=1)
+        grooves_fill = np.concatenate((grooves_fill,z),axis=0)
+        
+        # Concatenate groove height to groove
+        plane = np.expand_dims(plane,axis=1)
+        plane = np.concatenate((xy,plane),axis=1)
+        grooves_fill = np.concatenate((grooves_fill,plane),axis=0)
+
+
         # after we created all points, we count number of points added, to increase
         # the color matrix in the same size
         num_of_points_added = grooves_fill.shape[0]- colors_fill.shape[0]
-        color_new = torch.unsqueeze(color,0).to(device)
-        color_new = color_new.repeat(num_of_points_added,1)
-        colors_fill = torch.cat((colors_fill,color_new),0)
+        color_new = np.expand_dims(color,axis=0)
+        color_new = np.repeat(color_new,num_of_points_added,axis=0)
+        colors_fill = np.concatenate((colors_fill,color_new),0)
     
         
     return grooves_fill,colors_fill
@@ -232,7 +210,7 @@ def DrawPointCloud(stone):
     return pcd
 
 
-def DrawVoxelGrid(stone,colors,voxel_size=0.5):
+def DrawVoxelGrid(stone,colors=None,voxel_size=0.5):
     '''
     his function take Point Cloud as numpy 2D matrix (N,3) and transform it
     To VoxelGrid object in Open3D library and draw it
@@ -241,7 +219,7 @@ def DrawVoxelGrid(stone,colors,voxel_size=0.5):
     ----------
     stone : 2D numpy matrix, shape (N,3) float64
         Point cloud in numpy array
-    voxel_size : Size of drawn oxel, float64
+    voxel_size : Size of drawn voxel, float64
 
     Returns
     -------
@@ -250,7 +228,10 @@ def DrawVoxelGrid(stone,colors,voxel_size=0.5):
     '''
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(stone)
-    pcd.colors = o3d.utility.Vector3dVector(colors)
+    if colors is not None:
+        pcd.colors = o3d.utility.Vector3dVector(colors)
+    else:
+        pcd.paint_uniform_color((0,1,0))
     voxelgrid = o3d.geometry.VoxelGrid.create_from_point_cloud(pcd,voxel_size)
     
     o3d.visualization.draw_geometries([voxelgrid])
@@ -444,7 +425,7 @@ def DivideGroovesProjection(pcd,Projection,axis_intervals,quantile,num_margin_in
     plt.scatter(groove_end,groove_end_y,marker='o',color='g')
     #plt.plot(np.ones(np.shape(Projection_filtered))*threshold,color='c');
     plt.legend(['Filtered Projection_filtered','Groove starts','Groove ends'])
-    plt.grid()
+    plt.grid(); plt.ylim([0, 1.2*np.max(Projection_filtered)])
     
     # Fix indexs, we igonred the first 100 intervals at the segmentation process 
     groove_start = np.int64(groove_start + 100)
@@ -480,7 +461,7 @@ def DivideGroovesProjection(pcd,Projection,axis_intervals,quantile,num_margin_in
 
 
 
-def PlotSegmentedGrooves(grooves):
+def PlotSegmentedGrooves(grooves,voxel_size = 0.5):
     '''
     This function plot all grooves in one open3d pointcloud, every groove in different color
 
@@ -488,6 +469,7 @@ def PlotSegmentedGrooves(grooves):
     ----------
     grooves : list of 2D numpy array, every element in the list is (N,3) float64
         list of grooves, every element contain a point cloud of a single groove
+    voxel_size : Size of drawn voxel, float64
 
     Returns
     -------
@@ -516,8 +498,8 @@ def PlotSegmentedGrooves(grooves):
     
     pcd_grooves.points = o3d.utility.Vector3dVector(grooves_pcd)
     pcd_grooves.colors = o3d.utility.Vector3dVector(colors_pcd)
-        
-    pcd_grooves.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+    
+    pcd_grooves = o3d.geometry.VoxelGrid.create_from_point_cloud(pcd_grooves,voxel_size)
     o3d.visualization.draw_geometries([pcd_grooves])
     
     
