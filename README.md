@@ -1,10 +1,10 @@
-# Automatic Ablation Volume Estimation
+## Automatic Ablation Volume Estimation
 ----
  The following repo includes python code, that enable to read STL files, results from 3D light scanner of stones with grooves. 
  The grooves were created using laser cutting technology, and the goal is to measure the grooves volume automaticly. 
  
-# Requirements: Numpy, Open3D, and Pytorch with Cuda
-----
+## Requirements: Numpy, Open3D, and Pytorch with Cuda
+
 Numpy:
 ```sh
 conda install numpy
@@ -18,8 +18,8 @@ PyTorch with GPU:
 conda install pytorch torchvision torchaudio cudatoolkit=10.2 -c pytorch
 ```
 
-# Algorithm
-----
+## Algorithm
+
 Algorithm includes the following steps (modules or cells in Main.py):
  1. Read STL file (mesh traingulation) and convert it into Point Cloud
  2. Optional  Rotation of the point cloud. In our dataset, the planes were alligened with the coordinate system, but if your stone planes aren't allign with the coordinate system,     you should allign them, to make the automatic anaylsis possible. your first need to extract the angels from the detected main plane and then rotate the whole point cloud.  
@@ -30,8 +30,8 @@ Algorithm includes the following steps (modules or cells in Main.py):
  7. Calculate the volume of the groove using descrite integral, 
  8. Plot grooves and volumes
  
- # Results
- ----
+ ## Example of Results and steps
+ 
  Stone 3D scan, presented in Point Cloud (mesh traingulation)
  ![Image 1](https://github.com/shaimove/Automatic-Ablation-Volume-Estimation/blob/master/Imgaes/Stone%20-%20PointCloud.png)
  
@@ -64,13 +64,10 @@ Algorithm includes the following steps (modules or cells in Main.py):
   ![Image 11](https://github.com/shaimove/Automatic-Ablation-Volume-Estimation/blob/master/Imgaes/Result%203.png)
   
 
+## License
 
-  
+Private Property of Lumenis LTD. 
 
-  
-
-
-
-
-License
-----
+## Contact
+Developed by Sharon Haimov, Research Engineer at Lumenis
+Email: sharon.haimov@lumenis.com or shaimove@gmail.com
