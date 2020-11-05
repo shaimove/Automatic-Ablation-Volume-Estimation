@@ -69,5 +69,6 @@ Algorithm includes the following steps (modules or cells in Main.py):
 Private Property of Lumenis LTD. 
 
 ## Contact
-Developed by Sharon Haimov, Research Engineer at Lumenis
+Developed by Sharon Haimov, Research Engineer at Lumenis.
+
 Email: sharon.haimov@lumenis.com or shaimove@gmail.com
