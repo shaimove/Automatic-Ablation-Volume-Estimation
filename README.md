@@ -29,6 +29,12 @@ Algorithm includes the following steps (modules or cells in Main.py):
  6. Cutting the edges of the projection, beacuse we want to calculate the volume of the stone, using only the main plane, and we need to delete the rest of the planes. 
  7. Calculate the volume of the groove using descrite integral, 
  8. Plot grooves and volumes
+ 
+ # Resulrs
+ ----
+ Stone 3D scan, presented in Point Cloud (mesh traingulation)
+ ![Image of Yaktocat](https://github.com/shaimove/Automatic-Ablation-Volume-Estimation/blob/master/Imgaes/Stone%20-%20PointCloud.png)
+ 
 
 
 License
